@@ -1,5 +1,10 @@
 import { isValidSolanaAddress, normalizeAddress, shortAddress } from "./address";
-import { diffAgainst, type AddressDiff } from "./similarity";
+import {
+  commonPrefixLength,
+  commonSuffixLength,
+  diffAgainst,
+  type AddressDiff,
+} from "./similarity";
 import type { Counterparty } from "./types";
 
 export type Verdict = "safe" | "suspicious" | "high-risk" | "exact" | "self" | "invalid";
@@ -32,6 +37,57 @@ export interface RiskReport {
 
 export const HIGH_RISK_ANCHOR = 4;
 const SUSPICIOUS_SCORE_FLOOR = 42;
+
+export interface HistoryLookalike {
+  reference: Counterparty;
+  suspect: Counterparty;
+  prefix: number;
+  suffix: number;
+}
+
+/**
+ * Finds anchors *inside* the user's own history: two counterparties that share
+ * the same visible start and end. At most one of them can be the real one — the
+ * other is almost always a dust-sender trying to poison the clipboard.
+ */
+export function findHistoryLookalikes(
+  known: Counterparty[],
+  minAnchor = HIGH_RISK_ANCHOR,
+): HistoryLookalike[] {
+  const pairs: HistoryLookalike[] = [];
+
+  for (let i = 0; i < known.length; i += 1) {
+    for (let j = i + 1; j < known.length; j += 1) {
+      const a = known[i];
+      const b = known[j];
+      if (!a.address || !b.address || a.address === b.address) continue;
+
+      const prefix = commonPrefixLength(a.address, b.address);
+      if (prefix < minAnchor) continue;
+      const suffix = commonSuffixLength(
+        a.address,
+        b.address,
+        Math.min(a.address.length, b.address.length) - prefix,
+      );
+      if (suffix < minAnchor) continue;
+
+      const suspectFirst =
+        a.interactions < b.interactions ||
+        (a.interactions === b.interactions &&
+          (a.lastSeen ?? 0) > (b.lastSeen ?? 0));
+
+      pairs.push(
+        suspectFirst
+          ? { reference: b, suspect: a, prefix, suffix }
+          : { reference: a, suspect: b, prefix, suffix },
+      );
+    }
+  }
+
+  return pairs.sort(
+    (x, y) => x.suspect.interactions - y.suspect.interactions || y.prefix - x.prefix,
+  );
+}
 
 function classifyPair(prefix: number, suffix: number): MatchVerdict {
   if (prefix >= HIGH_RISK_ANCHOR && suffix >= HIGH_RISK_ANCHOR) return "high-risk";
@@ -142,6 +198,50 @@ export function evaluateAddress(
 
   const exact = known.find((entry) => entry.address === candidate);
   if (exact) {
+    const poisonedTwin = findHistoryLookalikes(known).find(
+      (pair) => pair.suspect.address === candidate,
+    );
+
+    if (poisonedTwin) {
+      const best = toMatch(
+        poisonedTwin.reference,
+        diffAgainst(candidate, poisonedTwin.reference.address),
+      );
+      best.verdict = "high-risk";
+      best.score = Math.max(88, best.score);
+
+      const genuine = toMatch(exact, diffAgainst(candidate, exact.address));
+      genuine.verdict = "exact";
+      genuine.score = 0;
+
+      return {
+        verdict: "high-risk",
+        score: best.score,
+        headline: "In your history — but it is the poisoned twin",
+        summary: `This address is in your history, but ${shortAddress(
+          poisonedTwin.reference.address,
+          6,
+        )} shares its first ${poisonedTwin.prefix} and last ${
+          poisonedTwin.suffix
+        } characters and has ${poisonedTwin.reference.interactions} interactions versus ${
+          poisonedTwin.suspect.interactions
+        }. You are holding the attacker's copy.`,
+        reasons: [
+          `Shares its first ${poisonedTwin.prefix} and last ${poisonedTwin.suffix} characters with ${shortAddress(
+            poisonedTwin.reference.address,
+            6,
+          )}.`,
+          `The other address has ${poisonedTwin.reference.interactions} recorded interactions; this one has only ${poisonedTwin.suspect.interactions}.`,
+          "Dust senders appear in your history on purpose so you copy the wrong row.",
+          "Use the verified address instead.",
+        ],
+        candidate,
+        best,
+        matches: [best, genuine],
+        comparedAgainst,
+      };
+    }
+
     const best = toMatch(exact, diffAgainst(candidate, exact.address));
     best.verdict = "exact";
     best.score = 0;

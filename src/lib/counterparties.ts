@@ -83,6 +83,12 @@ export function extractCounterparties(
 
     const pre = meta.preBalances ?? [];
     const post = meta.postBalances ?? [];
+
+    const walletIndex = keys.findIndex((key) => key.pubkey === wallet);
+    const walletSolDelta =
+      walletIndex >= 0 ? (post[walletIndex] ?? 0) - (pre[walletIndex] ?? 0) : 0;
+    let walletReceivedToken = false;
+
     for (let i = 0; i < keys.length; i += 1) {
       const address = keys[i].pubkey;
       if (!address || address === wallet || PROGRAM_IDS.has(address)) continue;
@@ -95,11 +101,22 @@ export function extractCounterparties(
       preToken.set(balance.accountIndex, toBigInt(balance.uiTokenAmount.amount));
     }
     for (const balance of meta.postTokenBalances ?? []) {
-      const owner = balance.owner;
-      if (!owner || owner === wallet) continue;
       const before = preToken.get(balance.accountIndex) ?? 0n;
       const after = toBigInt(balance.uiTokenAmount.amount);
+      const owner = balance.owner;
+      if (!owner) continue;
+      if (owner === wallet) {
+        if (after > before) walletReceivedToken = true;
+        continue;
+      }
       if (after > before) touched.add(owner);
+    }
+
+    // If the wallet received value from this transaction, its signer is the
+    // sender. This is how dust from an attacker enters your counterparty set.
+    if (walletSolDelta > 0 || walletReceivedToken) {
+      const sender = keys.find((key) => key.signer && key.pubkey !== wallet);
+      if (sender) touched.add(sender.pubkey);
     }
 
     if (touched.size === 0) {

@@ -95,12 +95,14 @@ export function getDemoBundle(): DemoBundle {
   const treasury = generatedAddress(rng);
   const dca = generatedAddress(rng);
   const cold = generatedAddress(rng);
+  const dust = makeLookalike(treasury, rng, 4, 4);
 
   const counterparties: Counterparty[] = [
     { address: real, interactions: 14, lastSeen: now - 60 * 60 * 3, label: "Alex · friend (verified)" },
     { address: treasury, interactions: 9, lastSeen: now - 60 * 60 * 26, label: "Treasury · ops" },
     { address: dca, interactions: 6, lastSeen: now - 60 * 60 * 24 * 2, label: "DCA bot" },
     { address: cold, interactions: 3, lastSeen: now - 60 * 60 * 24 * 6, label: "Cold storage" },
+    { address: dust, interactions: 1, lastSeen: now - 60 * 60 * 11, label: "Unknown · 0.000001 SOL dust" },
   ];
 
   const transactions: TxSummary[] = [
@@ -111,6 +113,7 @@ export function getDemoBundle(): DemoBundle {
     { signature: fakeSignature(rng), blockTime: now - 60 * 60 * 24 * 2, counterparties: [dca, real], direction: "mixed" },
     { signature: fakeSignature(rng), blockTime: now - 60 * 60 * 24 * 4, counterparties: [cold], direction: "sent" },
     { signature: fakeSignature(rng), blockTime: now - 60 * 60 * 24 * 6, counterparties: [treasury], direction: "received" },
+    { signature: fakeSignature(rng), blockTime: now - 60 * 60 * 11, counterparties: [dust], direction: "received" },
     { signature: fakeSignature(rng), blockTime: now - 60 * 60 * 24 * 8, counterparties: [real], direction: "sent" },
   ];
 

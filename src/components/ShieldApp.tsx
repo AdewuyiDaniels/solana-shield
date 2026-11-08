@@ -7,9 +7,10 @@ import { normalizeAddress, shortAddress } from "@/lib/address";
 import { getDemoBundle } from "@/lib/demo";
 import { hostOf } from "@/lib/format";
 import { fetchHistorySnapshot } from "@/lib/history";
-import { evaluateAddress } from "@/lib/risk";
+import { evaluateAddress, findHistoryLookalikes } from "@/lib/risk";
 import type { DataMode, HistorySnapshot } from "@/lib/types";
 import { Education } from "./Education";
+import { HistoryAlert } from "./HistoryAlert";
 import { HistoryPanel } from "./HistoryPanel";
 import { VerdictCard } from "./VerdictCard";
 
@@ -94,7 +95,7 @@ export default function ShieldApp() {
     [],
   );
 
-  const [mode, setMode] = useState<DataMode>("demo");
+  const [mode, setMode] = useState<DataMode>("live");
   const [snapshot, setSnapshot] = useState<HistorySnapshot | null>(null);
   const [status, setStatus] = useState<ScanStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +162,8 @@ export default function ShieldApp() {
     () => (candidate.trim() ? evaluateAddress(candidate, known, ownWallet) : null),
     [candidate, known, ownWallet],
   );
+
+  const historyLookalikes = useMemo(() => findHistoryLookalikes(known), [known]);
 
   const switchMode = useCallback((next: DataMode) => {
     setMode(next);
@@ -238,6 +241,8 @@ export default function ShieldApp() {
           copy the first and last characters of an address you already trust.
         </p>
       </section>
+
+      <HistoryAlert pairs={historyLookalikes} />
 
       <div className="mt-8 grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
         <section className="card p-5 shadow-glow">
@@ -366,7 +371,9 @@ export default function ShieldApp() {
                 <p className="mt-4 border-t border-line pt-3 text-[11px] text-mute">
                   {snapshot
                     ? `Ready — ${known.length} counterparties in context. Paste an address to see the verdict.`
-                    : "Waiting for history…"}
+                    : mode === "live" && !connected
+                      ? "Connect a wallet to scan real history, or switch to Demo."
+                      : "Waiting for history…"}
                 </p>
               </div>
             )}

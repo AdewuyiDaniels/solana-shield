@@ -7,7 +7,7 @@ import {
   shortAddress,
 } from "./address";
 import { commonPrefixLength, commonSuffixLength, diffAgainst } from "./similarity";
-import { evaluateAddress } from "./risk";
+import { evaluateAddress, findHistoryLookalikes } from "./risk";
 import {
   mulberry32,
   generatedAddress,
@@ -146,6 +146,41 @@ describe("risk engine", () => {
   });
 });
 
+describe("poisoning inside your own history", () => {
+  const rng = mulberry32(2024);
+  const genuine = generatedAddress(rng);
+  const twin = makeLookalike(genuine, rng, 4, 4);
+  const known = [
+    { address: genuine, interactions: 11, lastSeen: 1_700_000_000 },
+    { address: twin, interactions: 1, lastSeen: 1_700_005_000 },
+  ];
+
+  it("finds the lookalike pair in history", () => {
+    const pairs = findHistoryLookalikes(known);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].reference.address).toBe(genuine);
+    expect(pairs[0].suspect.address).toBe(twin);
+    expect(pairs[0].prefix).toBeGreaterThanOrEqual(4);
+    expect(pairs[0].suffix).toBeGreaterThanOrEqual(4);
+  });
+
+  it("warns when the few-interaction twin is pasted, even though it is in history", () => {
+    const report = evaluateAddress(twin, known);
+    expect(report.verdict).toBe("high-risk");
+    expect(report.headline).toContain("poisoned twin");
+  });
+
+  it("still accepts the genuinely used address", () => {
+    expect(evaluateAddress(genuine, known).verdict).toBe("exact");
+  });
+
+  it("does not invent pairs when nothing matches", () => {
+    expect(
+      findHistoryLookalikes([{ address: genuine, interactions: 2, lastSeen: null }]),
+    ).toHaveLength(0);
+  });
+});
+
 describe("demo bundle", () => {
   it("gives the demo four distinct, working targets", () => {
     const bundle = getDemoBundle();
@@ -172,6 +207,13 @@ describe("demo bundle", () => {
     const addresses = bundle.snapshot.counterparties.map((entry) => entry.address);
     expect(addresses).toContain(bundle.real);
     expect(addresses).not.toContain(bundle.lookalike);
+  });
+
+  it("contains a dust-sender pair so the history alert has something to show", () => {
+    const bundle = getDemoBundle();
+    const pairs = findHistoryLookalikes(bundle.snapshot.counterparties);
+    expect(pairs.length).toBeGreaterThanOrEqual(1);
+    expect(pairs[0].suspect.interactions).toBeLessThan(pairs[0].reference.interactions);
   });
 });
 
@@ -229,6 +271,34 @@ describe("counterparty extraction", () => {
     const entry = result.find((item) => item.address === recipient);
     expect(entry?.interactions).toBe(2);
     expect(entry?.lastSeen).toBe(1_700_009_999);
+  });
+
+  it("captures the signer when the wallet receives dust", () => {
+    const dustSender = "DustSender111111111111111111111111111111";
+    const received: ParsedTxLike = {
+      blockTime: 1_700_003_000,
+      transaction: {
+        signatures: ["dust"],
+        message: {
+          accountKeys: [
+            { pubkey: dustSender, signer: true },
+            { pubkey: wallet, signer: false },
+          ],
+        },
+      },
+      meta: {
+        err: null,
+        preBalances: [10_000_000, 1_000],
+        postBalances: [8_999_000, 1_001_000],
+        preTokenBalances: [],
+        postTokenBalances: [],
+      },
+    };
+
+    const result = extractCounterparties([received], wallet);
+    const entry = result.find((item) => item.address === dustSender);
+    expect(entry).toBeDefined();
+    expect(entry?.interactions).toBe(1);
   });
 
   it("ignores failed transactions", () => {
