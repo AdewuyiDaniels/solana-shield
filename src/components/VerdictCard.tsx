@@ -3,6 +3,7 @@
 import { shortAddress } from "@/lib/address";
 import { timeAgo } from "@/lib/format";
 import type { RiskReport, Verdict } from "@/lib/risk";
+import type { AddressReputation, ReputationVerdict } from "@/lib/types";
 import { diffAgainst } from "@/lib/similarity";
 import { CopyGuard } from "./CopyGuard";
 
@@ -94,6 +95,46 @@ function DiffRow({
         {label}
       </span>
       <AddressLine value={value} mask={mask} highlight={highlight} />
+    </div>
+  );
+}
+
+const NETWORK_TONE: Record<
+  ReputationVerdict,
+  { label: string; className: string }
+> = {
+  "dust-fanout": { label: "Dust fan-out", className: "text-danger" },
+  "dust-sender": { label: "Dust sender", className: "text-warn" },
+  active: { label: "Normal activity", className: "text-mute" },
+  quiet: { label: "Quiet", className: "text-dim" },
+  unknown: { label: "No public history", className: "text-dim" },
+};
+
+function NetworkBlock({ reputation }: { reputation: AddressReputation }) {
+  const tone = NETWORK_TONE[reputation.verdict];
+  return (
+    <div className="mt-4 border-t border-line pt-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="label">Network behavior</p>
+        <span
+          className={`mono text-[10.5px] uppercase tracking-[0.12em] ${tone.className}`}
+        >
+          {tone.label}
+        </span>
+      </div>
+      <p className="mt-1.5 text-[12px] leading-5 text-mute">{reputation.summary}</p>
+      <p className="mono mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-dim">
+        <span>{reputation.sampled} txs sampled</span>
+        <span>
+          {reputation.outbound} out / {reputation.inbound} in
+        </span>
+        <span>{reputation.distinctRecipients} recipients</span>
+        <span>{Math.round(reputation.dustShare * 100)}% dust</span>
+      </p>
+      <p className="mt-1.5 text-[10.5px] leading-4 text-dim">
+        Read from this address&apos;s own public signatures, independent of your
+        wallet.
+      </p>
     </div>
   );
 }
@@ -207,6 +248,8 @@ export function VerdictCard({ report }: { report: RiskReport }) {
             </ul>
           </div>
         ) : null}
+
+        {report.network ? <NetworkBlock reputation={report.network} /> : null}
 
         <div className="mt-5 flex flex-wrap items-center gap-2">
           {risky && report.best ? (

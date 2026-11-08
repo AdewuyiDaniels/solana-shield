@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { normalizeAddress } from "@/lib/address";
+import { isValidSolanaAddress, normalizeAddress } from "@/lib/address";
 import { getDemoBundle } from "@/lib/demo";
 import { hostOf } from "@/lib/format";
 import {
@@ -11,9 +11,11 @@ import {
   readCachedSnapshot,
   writeCachedSnapshot,
 } from "@/lib/history";
+import { applyReputation, fetchAddressReputation } from "@/lib/reputation";
 import { evaluateAddress, findHistoryLookalikes } from "@/lib/risk";
 import {
   DEFAULT_DEPTH,
+  type AddressReputation,
   type DataMode,
   type HistorySnapshot,
   type ScanProgress,
@@ -86,7 +88,12 @@ export default function ShieldApp() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [candidate, setCandidate] = useState("");
+  const [network, setNetwork] = useState<{
+    address: string;
+    reputation: AddressReputation;
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const reputationCache = useRef(new Map<string, AddressReputation>());
 
   useEffect(() => {
     const stored = window.localStorage.getItem(DEPTH_STORAGE_KEY);
@@ -186,10 +193,47 @@ export default function ShieldApp() {
   const known = useMemo(() => snapshot?.counterparties ?? [], [snapshot]);
   const ownWallet = mode === "live" ? walletAddress : (snapshot?.wallet ?? null);
 
-  const report = useMemo(
-    () => (candidate.trim() ? evaluateAddress(candidate, known, ownWallet) : null),
-    [candidate, known, ownWallet],
-  );
+  useEffect(() => {
+    setNetwork(null);
+    const address = normalizeAddress(candidate);
+    if (mode !== "live" || !isValidSolanaAddress(address)) return;
+
+    const cached = reputationCache.current.get(address);
+    if (cached) {
+      setNetwork({ address, reputation: cached });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void fetchAddressReputation(connection, address, {
+        signal: controller.signal,
+      })
+        .then((reputation) => {
+          if (controller.signal.aborted) return;
+          reputationCache.current.set(address, reputation);
+          setNetwork({ address, reputation });
+        })
+        .catch(() => {
+          // The local history verdict still stands; network lookup is optional.
+        });
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [candidate, mode, connection]);
+
+  const report = useMemo(() => {
+    if (!candidate.trim()) return null;
+    const base = evaluateAddress(candidate, known, ownWallet);
+    const reputation =
+      network && network.address === normalizeAddress(candidate)
+        ? network.reputation
+        : null;
+    return applyReputation(base, reputation);
+  }, [candidate, known, ownWallet, network]);
 
   const historyLookalikes = useMemo(() => findHistoryLookalikes(known), [known]);
 

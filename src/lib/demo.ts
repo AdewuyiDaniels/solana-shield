@@ -105,7 +105,7 @@ export function getDemoBundle(): DemoBundle {
       firstSeen: now - 60 * 60 * 24 * 96,
       debitLamports: 5_240_000_000,
       creditLamports: 1_100_000_000,
-      label: "Alex Â· friend (verified)",
+      label: "Alex · friend (verified)",
     },
     {
       address: treasury,
@@ -114,7 +114,7 @@ export function getDemoBundle(): DemoBundle {
       firstSeen: now - 60 * 60 * 24 * 140,
       debitLamports: 12_000_000_000,
       creditLamports: 2_000_000_000,
-      label: "Treasury Â· ops",
+      label: "Treasury · ops",
     },
     {
       address: dca,
@@ -140,7 +140,7 @@ export function getDemoBundle(): DemoBundle {
       creditLamports: 1000,
       debitLamports: 0,
       dustOnly: true,
-      label: "Unknown Â· dust sender",
+      label: "Unknown · dust sender",
     },
   ];
 

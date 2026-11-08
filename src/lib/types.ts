@@ -42,6 +42,29 @@ export interface HistorySnapshot {
   cached?: boolean;
 }
 
+export type ReputationVerdict =
+  | "dust-fanout"
+  | "dust-sender"
+  | "quiet"
+  | "active"
+  | "unknown";
+
+export interface AddressReputation {
+  address: string;
+  verdict: ReputationVerdict;
+  summary: string;
+  sampled: number;
+  outbound: number;
+  inbound: number;
+  dustOut: number;
+  dustShare: number;
+  distinctRecipients: number;
+  failed: number;
+  elapsedMs: number;
+  firstSeen: number | null;
+  lastSeen: number | null;
+}
+
 export type ScanPhase = "signatures" | "parse";
 
 export interface ScanProgress {

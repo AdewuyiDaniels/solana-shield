@@ -113,7 +113,7 @@ class EndpointPool {
   }
 }
 
-async function mapWithConcurrency<T, R>(
+export async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
   worker: (item: T, index: number) => Promise<R>,
@@ -218,7 +218,7 @@ function txConfig(version: 0 | 1): ParsedTxConfig {
   } as unknown as ParsedTxConfig;
 }
 
-async function getParsedTransaction(
+export async function getParsedTransaction(
   connection: Connection,
   signature: string,
 ): Promise<ParsedTransactionWithMeta | null> {
@@ -462,5 +462,6 @@ export async function fetchHistorySnapshot(
 
   return snapshotNow();
 }
+
 
 

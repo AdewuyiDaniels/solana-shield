@@ -7,7 +7,8 @@ import {
   shortAddress,
 } from "./address";
 import { commonPrefixLength, commonSuffixLength, diffAgainst } from "./similarity";
-import { evaluateAddress, findHistoryLookalikes } from "./risk";
+import { evaluateAddress, findHistoryLookalikes, type RiskReport } from "./risk";
+import { applyReputation, classifyReputation } from "./reputation";
 import {
   mulberry32,
   generatedAddress,
@@ -352,5 +353,95 @@ describe("counterparty extraction", () => {
     for (const entry of result) {
       expect(PROGRAM_IDS.has(entry.address)).toBe(false);
     }
+  });
+});
+
+describe("address reputation from its own history", () => {
+  const profile = {
+    outbound: 0,
+    inbound: 0,
+    dustOut: 0,
+    distinctRecipients: 0,
+    failed: 0,
+    elapsedMs: 10,
+    firstSeen: 1_700_000_000,
+    lastSeen: 1_700_100_000,
+  };
+
+  it("flags a dust fan-out sender", () => {
+    const result = classifyReputation({
+      ...profile,
+      sampled: 60,
+      outbound: 50,
+      inbound: 1,
+      dustOut: 40,
+      distinctRecipients: 38,
+    });
+    expect(result.verdict).toBe("dust-fanout");
+    expect(result.dustShare).toBeCloseTo(0.8);
+  });
+
+  it("flags a smaller dust sender as suspicious evidence", () => {
+    const result = classifyReputation({
+      ...profile,
+      sampled: 30,
+      outbound: 10,
+      inbound: 6,
+      dustOut: 3,
+      distinctRecipients: 3,
+    });
+    expect(result.verdict).toBe("dust-sender");
+  });
+
+  it("leaves normal activity alone", () => {
+    const result = classifyReputation({
+      ...profile,
+      sampled: 40,
+      outbound: 20,
+      inbound: 15,
+      dustOut: 1,
+      distinctRecipients: 18,
+    });
+    expect(result.verdict).toBe("active");
+  });
+
+  it("does not classify an address with no public history", () => {
+    expect(classifyReputation({ ...profile, sampled: 0 }).verdict).toBe("unknown");
+  });
+
+  function report(verdict: RiskReport["verdict"]): RiskReport {
+    return {
+      verdict,
+      score: 0,
+      headline: "",
+      summary: "",
+      reasons: [],
+      candidate: "Candidate111111111111111111111111111111",
+      best: null,
+      matches: [],
+      comparedAgainst: 0,
+    };
+  }
+
+  const fanout = classifyReputation({
+    ...profile,
+    sampled: 60,
+    outbound: 50,
+    inbound: 1,
+    dustOut: 40,
+    distinctRecipients: 38,
+  });
+
+  it("escalates an unknown address when its own history is a dust fan-out", () => {
+    const result = applyReputation(report("unknown"), fanout);
+    expect(result.verdict).toBe("high-risk");
+    expect(result.reasons[0]).toContain("dust transfers");
+    expect(result.network?.verdict).toBe("dust-fanout");
+  });
+
+  it("never clears an address the user has already paid", () => {
+    const result = applyReputation(report("exact"), fanout);
+    expect(result.verdict).toBe("exact");
+    expect(result.score).toBe(0);
   });
 });
