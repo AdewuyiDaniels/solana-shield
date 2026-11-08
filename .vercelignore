@@ -1,0 +1,7 @@
+﻿.agents/
+.taste-skill/
+dump-live.html
+*.log
+
+.claude/
+skills-lock.json

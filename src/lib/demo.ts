@@ -1,4 +1,4 @@
-import { isValidSolanaAddress } from "./address";
+﻿import { isValidSolanaAddress } from "./address";
 import { encodeBase58 } from "./base58";
 import { commonPrefixLength, commonSuffixLength } from "./similarity";
 import type { Counterparty, HistorySnapshot, TxSummary } from "./types";
@@ -98,11 +98,50 @@ export function getDemoBundle(): DemoBundle {
   const dust = makeLookalike(treasury, rng, 4, 4);
 
   const counterparties: Counterparty[] = [
-    { address: real, interactions: 14, lastSeen: now - 60 * 60 * 3, label: "Alex · friend (verified)" },
-    { address: treasury, interactions: 9, lastSeen: now - 60 * 60 * 26, label: "Treasury · ops" },
-    { address: dca, interactions: 6, lastSeen: now - 60 * 60 * 24 * 2, label: "DCA bot" },
-    { address: cold, interactions: 3, lastSeen: now - 60 * 60 * 24 * 6, label: "Cold storage" },
-    { address: dust, interactions: 1, lastSeen: now - 60 * 60 * 11, label: "Unknown · 0.000001 SOL dust" },
+    {
+      address: real,
+      interactions: 14,
+      lastSeen: now - 60 * 60 * 3,
+      firstSeen: now - 60 * 60 * 24 * 96,
+      debitLamports: 5_240_000_000,
+      creditLamports: 1_100_000_000,
+      label: "Alex Â· friend (verified)",
+    },
+    {
+      address: treasury,
+      interactions: 9,
+      lastSeen: now - 60 * 60 * 26,
+      firstSeen: now - 60 * 60 * 24 * 140,
+      debitLamports: 12_000_000_000,
+      creditLamports: 2_000_000_000,
+      label: "Treasury Â· ops",
+    },
+    {
+      address: dca,
+      interactions: 6,
+      lastSeen: now - 60 * 60 * 24 * 2,
+      firstSeen: now - 60 * 60 * 24 * 60,
+      creditLamports: 900_000_000,
+      label: "DCA bot",
+    },
+    {
+      address: cold,
+      interactions: 3,
+      lastSeen: now - 60 * 60 * 24 * 6,
+      firstSeen: now - 60 * 60 * 24 * 300,
+      debitLamports: 10_000_000_000,
+      label: "Cold storage",
+    },
+    {
+      address: dust,
+      interactions: 1,
+      lastSeen: now - 60 * 60 * 11,
+      firstSeen: now - 60 * 60 * 11,
+      creditLamports: 1000,
+      debitLamports: 0,
+      dustOnly: true,
+      label: "Unknown Â· dust sender",
+    },
   ];
 
   const transactions: TxSummary[] = [
@@ -123,12 +162,20 @@ export function getDemoBundle(): DemoBundle {
     counterparties,
     transactions,
     scanned: 62,
-    truncated: true,
+  observed: 64,
+  skipped: 2,
+  failed: 0,
+    depth: 64,
+    truncated: false,
+    hasMore: false,
     fetchedAt: now,
     elapsedMs: 1840,
-    rpcHost: "demo fixture",
+    windowStart: now - 60 * 60 * 24 * 21,
+    windowEnd: now - 60 * 60 * 3,
+    rpcHost: "sample fixture",
   };
 
   cached = { snapshot, real, lookalike, suspicious, unrelated };
   return cached;
 }
+

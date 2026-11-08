@@ -9,9 +9,17 @@ interface CopyGuardProps {
   warning?: string;
   reference?: string | null;
   label?: string;
+  variant?: "primary" | "secondary";
 }
 
-export function CopyGuard({ value, risky, warning, reference, label }: CopyGuardProps) {
+export function CopyGuard({
+  value,
+  risky,
+  warning,
+  reference,
+  label,
+  variant = "secondary",
+}: CopyGuardProps) {
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -30,9 +38,9 @@ export function CopyGuard({ value, risky, warning, reference, label }: CopyGuard
     return () => window.removeEventListener("keydown", onKey);
   }, [confirming]);
 
-  async function copyValue() {
+  async function copy(target: string) {
     try {
-      await navigator.clipboard.writeText(value);
+      await navigator.clipboard.writeText(target);
       setCopied(true);
     } catch {
       setCopied(false);
@@ -40,63 +48,98 @@ export function CopyGuard({ value, risky, warning, reference, label }: CopyGuard
     setConfirming(false);
   }
 
+  const buttonClass =
+    variant === "primary"
+      ? "btn-primary"
+      : risky
+        ? "btn-secondary border-danger/40 text-danger hover:border-danger/60 hover:bg-danger/10"
+        : "btn-secondary";
+
   return (
     <>
       <button
         type="button"
-        onClick={() => (risky ? setConfirming(true) : copyValue())}
-        className={
-          risky
-            ? "inline-flex items-center gap-2 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger transition hover:bg-danger/15"
-            : "inline-flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/5"
-        }
+        onClick={() => (risky ? setConfirming(true) : void copy(value))}
+        className={buttonClass}
       >
         {copied ? "Copied" : (label ?? (risky ? "Copy (guarded)" : "Copy address"))}
       </button>
 
       {confirming ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center">
-          <div className="w-full max-w-md animate-rise rounded-2xl border border-danger/40 bg-panel p-6 shadow-glow">
-            <div className="mb-3 flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-danger/15 text-lg font-black text-danger">
-                !
-              </span>
-              <h3 className="text-lg font-bold text-white">This address looks poisoned</h3>
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="copy-guard-title"
+        >
+          <div className="w-full max-w-lg rounded-lg border border-danger/40 bg-panel">
+            <div className="border-b border-line px-5 py-3">
+              <p className="mono text-[10.5px] font-semibold uppercase tracking-[0.18em] text-danger">
+                Copy blocked
+              </p>
+              <h3
+                id="copy-guard-title"
+                className="mt-1 text-[17px] font-semibold text-[#f1f2f4]"
+              >
+                This address matches a known lookalike
+              </h3>
             </div>
-            <p className="text-sm text-slate-300">
-              {warning ??
-                "It matches the visible start and end of an address you have used before, which is the signature of an address-poisoning attack."}
-            </p>
-            {reference ? (
-              <div className="mt-4 rounded-xl border border-line bg-black/30 p-3">
-                <p className="label mb-1">The address you have used</p>
-                <code className="mono break-all text-xs text-safe">
-                  {reference}
+
+            <div className="px-5 py-4">
+              <p className="text-[13px] leading-6 text-mute">
+                {warning ??
+                  "It shares the visible start and end of an address you have used before, which is how poisoning addresses get copied."}
+              </p>
+
+              {reference ? (
+                <div className="mt-4">
+                  <p className="label mb-1.5">Address from your history</p>
+                  <code className="mono block break-all rounded-md border border-safe/30 bg-safe/[0.06] px-3 py-2 text-[12px] text-safe">
+                    {reference}
+                  </code>
+                </div>
+              ) : null}
+
+              <div className="mt-3">
+                <p className="label mb-1.5 text-danger">You are about to copy</p>
+                <code className="mono block break-all rounded-md border border-danger/30 bg-danger/[0.06] px-3 py-2 text-[12px] text-danger">
+                  {value}
                 </code>
               </div>
-            ) : null}
-            <div className="mt-4 rounded-xl border border-danger/30 bg-danger/5 p-3">
-              <p className="label mb-1 text-danger">You are copying</p>
-              <code className="mono break-all text-xs text-danger">{value}</code>
             </div>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+
+            <div className="flex flex-col gap-2 border-t border-line px-5 py-4 sm:flex-row">
+              {reference ? (
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => void copy(reference)}
+                  className="btn-primary flex-1"
+                >
+                  Copy the verified address
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setConfirming(false)}
+                  className="btn-primary flex-1"
+                >
+                  Go back
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setConfirming(false)}
-                className="btn-primary flex-1"
-              >
-                Go back — safest choice
-              </button>
-              <button
-                type="button"
-                onClick={copyValue}
-                className="inline-flex flex-1 items-center justify-center rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-mute transition hover:bg-white/5"
+                onClick={() => void copy(value)}
+                className="btn-quiet flex-1 justify-center border border-line2"
               >
                 Copy anyway
               </button>
             </div>
-            <p className="mt-3 text-center text-[11px] text-mute">
-              Never send funds to {shortAddress(value)}. Confirm the full address with the recipient.
+
+            <p className="border-t border-line px-5 py-3 text-[11px] leading-5 text-dim">
+              Never send funds to {shortAddress(value)}. Confirm the full address
+              with the recipient through a channel you trust.
             </p>
           </div>
         </div>

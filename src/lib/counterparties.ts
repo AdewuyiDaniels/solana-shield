@@ -44,6 +44,16 @@ export const PROGRAM_IDS = new Set<string>([
   "BPFLoader2111111111111111111111111111111111",
 ]);
 
+/** Anything at or below 0.001 SOL received and never repaid reads as dust. */
+export const DUST_LAMPORTS = 1_000_000;
+
+interface Accrual {
+  credit: number;
+  debit: number;
+  credits: number;
+  debits: number;
+}
+
 function toBigInt(value: string | undefined): bigint {
   if (!value) return 0n;
   try {
@@ -53,22 +63,67 @@ function toBigInt(value: string | undefined): bigint {
   }
 }
 
+function emptyAccrual(): Accrual {
+  return { credit: 0, debit: 0, credits: 0, debits: 0 };
+}
+
+function accrue(
+  map: Map<string, Accrual>,
+  address: string,
+  kind: "credit" | "debit",
+  lamports = 0,
+  transfers = 0,
+): void {
+  const entry = map.get(address) ?? emptyAccrual();
+  if (kind === "credit") {
+    entry.credit += lamports;
+    entry.credits += transfers;
+  } else {
+    entry.debit += lamports;
+    entry.debits += transfers;
+  }
+  map.set(address, entry);
+}
+
+function isAccount(address: string | undefined, wallet: string): boolean {
+  return Boolean(address) && address !== wallet && !PROGRAM_IDS.has(address as string);
+}
+
+/**
+ * Builds wallet-centric counterparties: what the wallet received from an
+ * address and what it sent, never the address's own balance changes. That is
+ * what makes a dust sender recognisable (credited the wallet, never paid).
+ */
 export function extractCounterparties(
   transactions: ParsedTxLike[],
   wallet: string,
 ): Counterparty[] {
   const found = new Map<string, Counterparty>();
 
-  const touch = (address: string, blockTime: number | null) => {
-    if (!address || address === wallet) return;
+  const merge = (address: string, blockTime: number | null, delta: Accrual) => {
     const existing = found.get(address) ?? {
       address,
       interactions: 0,
       lastSeen: null,
+      firstSeen: null,
+      creditLamports: 0,
+      debitLamports: 0,
+      creditTransfers: 0,
+      debitTransfers: 0,
     };
     existing.interactions += 1;
-    if (blockTime && (existing.lastSeen === null || blockTime > existing.lastSeen)) {
-      existing.lastSeen = blockTime;
+    existing.creditLamports = (existing.creditLamports ?? 0) + delta.credit;
+    existing.debitLamports = (existing.debitLamports ?? 0) + delta.debit;
+    existing.creditTransfers = (existing.creditTransfers ?? 0) + delta.credits;
+    existing.debitTransfers = (existing.debitTransfers ?? 0) + delta.debits;
+    if (blockTime) {
+      if (existing.lastSeen === null || blockTime > existing.lastSeen) {
+        existing.lastSeen = blockTime;
+      }
+      const firstSeen = existing.firstSeen ?? null;
+      if (firstSeen === null || blockTime < firstSeen) {
+        existing.firstSeen = blockTime;
+      }
     }
     found.set(address, existing);
   };
@@ -79,59 +134,80 @@ export function extractCounterparties(
 
     const blockTime = tx.blockTime ?? null;
     const keys = tx.transaction.message.accountKeys ?? [];
-    const touched = new Set<string>();
+    const touched = new Map<string, Accrual>();
 
     const pre = meta.preBalances ?? [];
     const post = meta.postBalances ?? [];
-
     const walletIndex = keys.findIndex((key) => key.pubkey === wallet);
     const walletSolDelta =
       walletIndex >= 0 ? (post[walletIndex] ?? 0) - (pre[walletIndex] ?? 0) : 0;
+
+    const sender = keys.find(
+      (key) => key.signer && isAccount(key.pubkey, wallet),
+    );
     let walletReceivedToken = false;
 
-    for (let i = 0; i < keys.length; i += 1) {
-      const address = keys[i].pubkey;
-      if (!address || address === wallet || PROGRAM_IDS.has(address)) continue;
-      const delta = (post[i] ?? 0) - (pre[i] ?? 0);
-      if (delta > 0) touched.add(address);
+    if (walletSolDelta > 0 && sender) {
+      accrue(touched, sender.pubkey, "credit", walletSolDelta, 0);
     }
 
-    const preToken = new Map<number, bigint>();
+    if (walletSolDelta < 0) {
+      for (let i = 0; i < keys.length; i += 1) {
+        const address = keys[i].pubkey;
+        if (!isAccount(address, wallet)) continue;
+        const delta = (post[i] ?? 0) - (pre[i] ?? 0);
+        if (delta > 0) accrue(touched, address, "debit", delta, 0);
+      }
+    }
+
+    const preToken = new Map<number, { owner: string; amount: bigint }>();
     for (const balance of meta.preTokenBalances ?? []) {
-      preToken.set(balance.accountIndex, toBigInt(balance.uiTokenAmount.amount));
+      if (!balance.owner) continue;
+      preToken.set(balance.accountIndex, {
+        owner: balance.owner,
+        amount: toBigInt(balance.uiTokenAmount.amount),
+      });
     }
     for (const balance of meta.postTokenBalances ?? []) {
-      const before = preToken.get(balance.accountIndex) ?? 0n;
-      const after = toBigInt(balance.uiTokenAmount.amount);
       const owner = balance.owner;
       if (!owner) continue;
+      const before = preToken.get(balance.accountIndex)?.amount ?? 0n;
+      const after = toBigInt(balance.uiTokenAmount.amount);
+      if (after === before) continue;
       if (owner === wallet) {
         if (after > before) walletReceivedToken = true;
         continue;
       }
-      if (after > before) touched.add(owner);
+      accrue(touched, owner, after > before ? "debit" : "credit", 0, 1);
     }
 
-    // If the wallet received value from this transaction, its signer is the
-    // sender. This is how dust from an attacker enters your counterparty set.
-    if (walletSolDelta > 0 || walletReceivedToken) {
-      const sender = keys.find((key) => key.signer && key.pubkey !== wallet);
-      if (sender) touched.add(sender.pubkey);
+    if (walletReceivedToken && sender) {
+      accrue(touched, sender.pubkey, "credit", 0, 1);
     }
 
     if (touched.size === 0) {
       for (const key of keys) {
-        if (!key.pubkey || key.pubkey === wallet) continue;
-        if (PROGRAM_IDS.has(key.pubkey)) continue;
+        if (!isAccount(key.pubkey, wallet)) continue;
         if (key.signer) continue;
-        touched.add(key.pubkey);
+        touched.set(key.pubkey, emptyAccrual());
       }
     }
 
-    for (const address of touched) touch(address, blockTime);
+    for (const [address, delta] of touched) merge(address, blockTime, delta);
   }
 
-  return [...found.values()].sort(
-    (a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0),
+  const result = [...found.values()];
+  for (const entry of result) {
+    const credit = entry.creditLamports ?? 0;
+    const debit = entry.debitLamports ?? 0;
+    const tokenCredits = entry.creditTransfers ?? 0;
+    entry.dustOnly =
+      credit > 0 && debit === 0 && tokenCredits === 0 && credit <= DUST_LAMPORTS;
+  }
+
+  return result.sort(
+    (a, b) =>
+      (b.lastSeen ?? 0) - (a.lastSeen ?? 0) ||
+      b.interactions - a.interactions,
   );
 }

@@ -15,6 +15,7 @@ import {
   getDemoBundle,
 } from "./demo";
 import { extractCounterparties, PROGRAM_IDS, type ParsedTxLike } from "./counterparties";
+import { formatSolPrecise } from "./format";
 
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 
@@ -139,10 +140,25 @@ describe("risk engine", () => {
     expect(report.reasons.join(" ")).toContain("last");
   });
 
-  it("handles an empty history without crashing", () => {
+  it("refuses to clear an address with no history to compare", () => {
     const report = evaluateAddress(poison, []);
-    expect(report.verdict).toBe("safe");
+    expect(report.verdict).toBe("unknown");
     expect(report.comparedAgainst).toBe(0);
+  });
+
+  it("treats an address known only for dust as suspicious", () => {
+    const dust = generatedAddress(mulberry32(77));
+    const report = evaluateAddress(dust, [
+      {
+        address: dust,
+        interactions: 1,
+        lastSeen: 1_700_000_000,
+        creditLamports: 1000,
+        dustOnly: true,
+      },
+    ]);
+    expect(report.verdict).toBe("suspicious");
+    expect(report.reasons.join(" ")).toContain("dust");
   });
 });
 
@@ -299,6 +315,23 @@ describe("counterparty extraction", () => {
     const entry = result.find((item) => item.address === dustSender);
     expect(entry).toBeDefined();
     expect(entry?.interactions).toBe(1);
+    expect(entry?.creditLamports).toBe(1_000_000);
+    expect(entry?.debitLamports).toBe(0);
+    expect(entry?.dustOnly).toBe(true);
+  });
+
+  it("does not mark a counterparty the wallet paid as dust", () => {
+    const result = extractCounterparties([tx()], wallet);
+    const entry = result.find((item) => item.address === recipient);
+    expect(entry?.debitLamports).toBe(1_000);
+    expect(entry?.creditLamports).toBe(0);
+    expect(entry?.dustOnly).toBe(false);
+  });
+
+  it("keeps dust visible when formatting SOL", () => {
+    expect(formatSolPrecise(1000)).toBe("0.000001 SOL");
+    expect(formatSolPrecise(1_000_000)).toBe("0.001 SOL");
+    expect(formatSolPrecise(5_240_000_000)).toBe("5.24 SOL");
   });
 
   it("ignores failed transactions", () => {

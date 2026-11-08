@@ -1,4 +1,5 @@
-import { isValidSolanaAddress, normalizeAddress, shortAddress } from "./address";
+﻿import { isValidSolanaAddress, normalizeAddress, shortAddress } from "./address";
+import { formatSolPrecise } from "./format";
 import {
   commonPrefixLength,
   commonSuffixLength,
@@ -7,7 +8,14 @@ import {
 } from "./similarity";
 import type { Counterparty } from "./types";
 
-export type Verdict = "safe" | "suspicious" | "high-risk" | "exact" | "self" | "invalid";
+export type Verdict =
+  | "safe"
+  | "suspicious"
+  | "high-risk"
+  | "exact"
+  | "self"
+  | "unknown"
+  | "invalid";
 export type MatchVerdict = "exact" | "high-risk" | "suspicious" | "weak";
 
 export interface MatchDetail {
@@ -46,8 +54,21 @@ export interface HistoryLookalike {
 }
 
 /**
+ * Orders two lookalike counterparties by how much they look like an attacker:
+ * a dust-only address first, then the one with fewer interactions, then the
+ * one that appeared most recently.
+ */
+function compareSuspect(a: Counterparty, b: Counterparty): number {
+  const dust =
+    (a.dustOnly ? 0 : 1) - (b.dustOnly ? 0 : 1);
+  if (dust !== 0) return dust;
+  if (a.interactions !== b.interactions) return a.interactions - b.interactions;
+  return (b.lastSeen ?? 0) - (a.lastSeen ?? 0);
+}
+
+/**
  * Finds anchors *inside* the user's own history: two counterparties that share
- * the same visible start and end. At most one of them can be the real one — the
+ * the same visible start and end. At most one of them can be the real one â€” the
  * other is almost always a dust-sender trying to poison the clipboard.
  */
 export function findHistoryLookalikes(
@@ -71,10 +92,7 @@ export function findHistoryLookalikes(
       );
       if (suffix < minAnchor) continue;
 
-      const suspectFirst =
-        a.interactions < b.interactions ||
-        (a.interactions === b.interactions &&
-          (a.lastSeen ?? 0) > (b.lastSeen ?? 0));
+      const suspectFirst = compareSuspect(a, b) < 0;
 
       pairs.push(
         suspectFirst
@@ -181,7 +199,7 @@ export function evaluateAddress(
       ...emptyReport(candidate, comparedAgainst),
       headline: "Not a valid Solana address",
       summary:
-        "That is not a base58-encoded 32-byte public key. A real Solana address is 32–44 characters long.",
+        "That is not a base58-encoded 32-byte public key. A real Solana address is 32â€“44 characters long.",
       reasons: ["A truncated paste or one extra character is the usual cause."],
     };
   }
@@ -193,6 +211,21 @@ export function evaluateAddress(
       headline: "This is your own wallet",
       summary: "You are about to send to yourself, not to a counterparty.",
       reasons: ["Double-check the amount and the token mint before signing."],
+    };
+  }
+
+  if (comparedAgainst === 0) {
+    return {
+      ...emptyReport(candidate, comparedAgainst),
+      verdict: "unknown",
+      headline: "No history to compare against",
+      summary:
+        "This wallet has no counterparties in the scanned window, so a green result would be meaningless. Increase the scan depth or use a wallet with activity.",
+      reasons: [
+        "Shield compares against addresses taken from your own transactions.",
+        "With an empty window there is nothing to compare, so nothing is cleared.",
+        "Paste the full address and confirm it with the recipient instead.",
+      ],
     };
   }
 
@@ -217,7 +250,7 @@ export function evaluateAddress(
       return {
         verdict: "high-risk",
         score: best.score,
-        headline: "In your history — but it is the poisoned twin",
+        headline: "In your history â€” but it is the poisoned twin",
         summary: `This address is in your history, but ${shortAddress(
           poisonedTwin.reference.address,
           6,
@@ -232,6 +265,13 @@ export function evaluateAddress(
             6,
           )}.`,
           `The other address has ${poisonedTwin.reference.interactions} recorded interactions; this one has only ${poisonedTwin.suspect.interactions}.`,
+          ...(poisonedTwin.suspect.dustOnly
+            ? [
+                `This one has only ever credited you ${formatSolPrecise(
+                  poisonedTwin.suspect.creditLamports ?? 0,
+                )} and never received anything back.`,
+              ]
+            : []),
           "Dust senders appear in your history on purpose so you copy the wrong row.",
           "Use the verified address instead.",
         ],
@@ -245,10 +285,31 @@ export function evaluateAddress(
     const best = toMatch(exact, diffAgainst(candidate, exact.address));
     best.verdict = "exact";
     best.score = 0;
+
+    if (exact.dustOnly) {
+      return {
+        verdict: "suspicious",
+        score: 58,
+        headline: "Known only from a dust transfer",
+        summary: `This address appears in your history, but it has only ever credited you ${formatSolPrecise(
+          exact.creditLamports ?? 0,
+        )} and never received a payment. That is how poisoning addresses enter a wallet.`,
+        reasons: [
+          "No transfer from this address to you has ever been more than dust.",
+          "A real counterparty you paid would normally show a transfer out.",
+          "Confirm the full address with the recipient before sending anything.",
+        ],
+        candidate,
+        best,
+        matches: [best],
+        comparedAgainst,
+      };
+    }
+
     return {
       verdict: "exact",
       score: 0,
-      headline: "Known address — exact match",
+      headline: "Known address â€” exact match",
       summary: `This exact address is already in your recent history${
         exact.interactions > 1 ? ` (${exact.interactions} interactions)` : ""
       }.`,
@@ -270,27 +331,30 @@ export function evaluateAddress(
   const best = matches[0] ?? null;
 
   if (!best || best.verdict === "weak") {
+    const reasons = [
+      "No known counterparty matches both the start and the end of this address.",
+      "This does not prove the address is legitimate â€” confirm it with the recipient.",
+    ];
+    if (comparedAgainst < 5) {
+      reasons.unshift(
+        `Only ${comparedAgainst} ${plural(
+          comparedAgainst,
+          "counterparty",
+          "counterparties",
+        )} were available. Scan deeper before trusting a green result.`,
+      );
+    }
+
     return {
       verdict: "safe",
       score: best ? Math.min(30, best.score) : 0,
-      headline: "No lookalike detected",
-      summary:
-        comparedAgainst === 0
-          ? "There is no recent counterparty history to compare against yet. Use demo mode or connect a wallet with activity."
-          : `Compared against ${comparedAgainst} recent ${plural(
-              comparedAgainst,
-              "counterparty",
-              "counterparties",
-            )}. None of them shares this address's opening and closing characters.`,
-      reasons:
-        comparedAgainst === 0
-          ? [
-              "A brand-new address always looks new. Check the first and last characters against the source yourself.",
-            ]
-          : [
-              "No known counterparty matches both the start and the end of this address.",
-              "This does not prove the address is legitimate — confirm it with the recipient.",
-            ],
+      headline: "No lookalike in your history",
+      summary: `Compared against ${comparedAgainst} ${plural(
+        comparedAgainst,
+        "counterparty",
+        "counterparties",
+      )}. None of them shares this address's opening and closing characters.`,
+      reasons,
       candidate,
       best,
       matches: matches.slice(0, 3),
@@ -304,7 +368,7 @@ export function evaluateAddress(
     return {
       verdict: "high-risk",
       score: Math.max(88, best.score),
-      headline: "High risk — likely a poisoned lookalike",
+      headline: "High risk â€” likely a poisoned lookalike",
       summary: `This address mimics ${anchor}, an address you have already used. The opening and closing characters match; only the middle differs.`,
       reasons: [
         `Shares its first ${best.prefix} and last ${best.suffix} characters with ${anchor}.`,
@@ -332,7 +396,7 @@ export function evaluateAddress(
   return {
     verdict: "suspicious",
     score: best.score,
-    headline: "Suspicious — verify before sending",
+    headline: "Suspicious â€” verify before sending",
     summary: `This address is unusually close to ${anchor}. It shares part of the visible prefix and suffix, but not both full anchors.`,
     reasons: [
       `Shares its first ${best.prefix} and last ${best.suffix} characters with ${anchor}.`,
@@ -345,3 +409,4 @@ export function evaluateAddress(
     comparedAgainst,
   };
 }
+

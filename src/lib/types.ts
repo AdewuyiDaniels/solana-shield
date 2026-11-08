@@ -2,7 +2,15 @@ export interface Counterparty {
   address: string;
   interactions: number;
   lastSeen: number | null;
+  firstSeen?: number | null;
   label?: string;
+  /** Lamports this address has sent into the wallet. */
+  creditLamports?: number;
+  /** Lamports the wallet has sent to this address. */
+  debitLamports?: number;
+  creditTransfers?: number;
+  debitTransfers?: number;
+  dustOnly?: boolean;
 }
 
 export type DataMode = "demo" | "live";
@@ -20,8 +28,35 @@ export interface HistorySnapshot {
   counterparties: Counterparty[];
   transactions: TxSummary[];
   scanned: number;
+  observed: number;
+  skipped?: number;
+  failed: number;
+  depth: number;
   truncated: boolean;
+  hasMore: boolean;
   fetchedAt: number;
   elapsedMs: number;
+  windowStart: number | null;
+  windowEnd: number | null;
   rpcHost?: string;
+  cached?: boolean;
 }
+
+export type ScanPhase = "signatures" | "parse";
+
+export interface ScanProgress {
+  phase: ScanPhase;
+  done: number;
+  total: number;
+}
+
+export const DEPTH_PRESETS = [100, 500, 1000, 2000] as const;
+export type ScanDepth = (typeof DEPTH_PRESETS)[number];
+export const DEFAULT_DEPTH: ScanDepth = 500;
+
+export const DEPTH_ESTIMATE_SECONDS: Record<ScanDepth, number> = {
+  100: 3,
+  500: 11,
+  1000: 22,
+  2000: 45,
+};

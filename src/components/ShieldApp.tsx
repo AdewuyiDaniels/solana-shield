@@ -1,14 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { normalizeAddress, shortAddress } from "@/lib/address";
+import { normalizeAddress } from "@/lib/address";
 import { getDemoBundle } from "@/lib/demo";
 import { hostOf } from "@/lib/format";
-import { fetchHistorySnapshot } from "@/lib/history";
+import {
+  fetchHistorySnapshot,
+  readCachedSnapshot,
+  writeCachedSnapshot,
+} from "@/lib/history";
 import { evaluateAddress, findHistoryLookalikes } from "@/lib/risk";
-import type { DataMode, HistorySnapshot } from "@/lib/types";
+import {
+  DEFAULT_DEPTH,
+  type DataMode,
+  type HistorySnapshot,
+  type ScanProgress,
+} from "@/lib/types";
 import { Education } from "./Education";
 import { HistoryAlert } from "./HistoryAlert";
 import { HistoryPanel } from "./HistoryPanel";
@@ -16,31 +25,23 @@ import { VerdictCard } from "./VerdictCard";
 
 type ScanStatus = "idle" | "loading" | "ready" | "error";
 
-function Logo() {
+const DEPTH_STORAGE_KEY = "solana-shield:depth";
+
+function Mark() {
   return (
-    <svg viewBox="0 0 32 32" className="h-9 w-9" aria-hidden>
-      <defs>
-        <linearGradient id="shield-gradient" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#9945ff" />
-          <stop offset="100%" stopColor="#14f195" />
-        </linearGradient>
-      </defs>
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden>
       <path
-        d="M16 2.5 27 6.5v9.2c0 6.6-4.4 11.6-11 13.8-6.6-2.2-11-7.2-11-13.8V6.5L16 2.5Z"
-        fill="url(#shield-gradient)"
-        opacity="0.16"
+        d="M12 2.8 20 5.8v6c0 4.8-3.2 8.4-8 10-4.8-1.6-8-5.2-8-10v-6L12 2.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
       />
       <path
-        d="M16 2.5 27 6.5v9.2c0 6.6-4.4 11.6-11 13.8-6.6-2.2-11-7.2-11-13.8V6.5L16 2.5Z"
+        d="m8.6 12 2.4 2.4 4.5-4.6"
         fill="none"
-        stroke="url(#shield-gradient)"
+        stroke="currentColor"
         strokeWidth="1.6"
-      />
-      <path
-        d="m11 16.4 3.2 3.2L21 12.8"
-        fill="none"
-        stroke="#14f195"
-        strokeWidth="2.2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -48,84 +49,105 @@ function Logo() {
   );
 }
 
-function ModeSwitch({
-  mode,
-  onChange,
-}: {
-  mode: DataMode;
-  onChange: (mode: DataMode) => void;
-}) {
-  return (
-    <div className="flex rounded-xl border border-line bg-black/30 p-0.5 text-xs font-semibold">
-      {(["demo", "live"] as const).map((option) => (
-        <button
-          key={option}
-          type="button"
-          onClick={() => onChange(option)}
-          className={`rounded-[10px] px-3 py-1.5 transition ${
-            mode === option
-              ? "bg-white/10 text-white"
-              : "text-mute hover:text-slate-200"
-          }`}
-        >
-          {option === "demo" ? "Demo" : "Live"}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-const STEPS = [
-  { title: "Paste", body: "Drop any Solana address into the box." },
-  { title: "Compare", body: "We diff it against your recent counterparties." },
-  { title: "Decide", body: "Safe, suspicious, or likely poisoned — before you sign." },
+const EMPTY_STEPS = [
+  {
+    title: "Paste the destination",
+    body: "A wallet address, a Solana Pay link, or a copy from another app.",
+  },
+  {
+    title: "Shield diffs it against your history",
+    body: "Every counterparty in the scanned window is compared on its opening and closing characters.",
+  },
+  {
+    title: "You see the exact characters that differ",
+    body: "High risk, suspicious, exact, or no match — with the evidence behind it.",
+  },
 ];
 
 export default function ShieldApp() {
   const { connection } = useConnection();
   const { publicKey, connected } = useWallet();
+  const walletAddress = publicKey?.toBase58() ?? null;
 
   const demo = useMemo(() => getDemoBundle(), []);
   const rpcHost = useMemo(
     () =>
       hostOf(
         process.env.NEXT_PUBLIC_SOLANA_RPC_URL ??
-          "https://api.mainnet-beta.solana.com",
+          "https://solana-rpc.publicnode.com",
       ),
     [],
   );
 
   const [mode, setMode] = useState<DataMode>("live");
+  const [depth, setDepth] = useState<number>(DEFAULT_DEPTH);
   const [snapshot, setSnapshot] = useState<HistorySnapshot | null>(null);
   const [status, setStatus] = useState<ScanStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(
-    null,
-  );
+  const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [candidate, setCandidate] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
 
-  const loadDemo = useCallback(() => {
-    setSnapshot(demo.snapshot);
-    setStatus("ready");
-    setError(null);
-    setProgress(null);
-  }, [demo]);
+  useEffect(() => {
+    const stored = window.localStorage.getItem(DEPTH_STORAGE_KEY);
+    const parsed = stored ? Number(stored) : NaN;
+    if ([100, 500, 1000, 2000].includes(parsed)) setDepth(parsed);
+  }, []);
+
+  const changeDepth = useCallback((next: number) => {
+    setDepth(next);
+    try {
+      window.localStorage.setItem(DEPTH_STORAGE_KEY, String(next));
+    } catch {
+      // Private mode can block storage; depth still applies to this session.
+    }
+  }, []);
 
   const loadLive = useCallback(
-    async (address: string) => {
+    async (address: string, options: { force?: boolean } = {}) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      if (!options.force) {
+        const cached = readCachedSnapshot(address, depth);
+        if (cached) {
+          setSnapshot(cached);
+          setStatus("ready");
+          setError(null);
+          setProgress(null);
+          return;
+        }
+      }
+
       setStatus("loading");
       setError(null);
-      setProgress({ done: 0, total: 0 });
       setSnapshot(null);
+      setProgress({ phase: "signatures", done: 0, total: depth });
+
       try {
         const result = await fetchHistorySnapshot(connection, address, {
-          limit: 40,
-          onProgress: (done, total) => setProgress({ done, total }),
+          depth,
+          signal: controller.signal,
+          onProgress: setProgress,
+          onPartial: (partial) => {
+            if (!controller.signal.aborted) setSnapshot(partial);
+          },
         });
+        if (controller.signal.aborted) return;
+        writeCachedSnapshot(result);
         setSnapshot(result);
         setStatus("ready");
+        setProgress(null);
       } catch (cause) {
+        if (
+          controller.signal.aborted ||
+          (cause instanceof Error && cause.name === "AbortError")
+        ) {
+          return;
+        }
         setStatus("error");
+        setProgress(null);
         setError(
           cause instanceof Error
             ? cause.message
@@ -133,30 +155,36 @@ export default function ShieldApp() {
         );
       }
     },
-    [connection],
+    [connection, depth],
   );
 
-  useEffect(() => {
-    if (mode === "demo") loadDemo();
-  }, [mode, loadDemo]);
+  const loadDemo = useCallback(() => {
+    abortRef.current?.abort();
+    setSnapshot(demo.snapshot);
+    setStatus("ready");
+    setError(null);
+    setProgress(null);
+  }, [demo]);
 
   useEffect(() => {
-    if (mode === "live" && connected && publicKey) {
-      void loadLive(publicKey.toBase58());
+    if (mode === "demo") {
+      loadDemo();
+      return;
     }
-  }, [mode, connected, publicKey, loadLive]);
-
-  useEffect(() => {
-    if (mode === "live" && !connected) {
+    if (!connected || !walletAddress) {
       setSnapshot(null);
       setStatus("idle");
       setError(null);
       setProgress(null);
+      return;
     }
-  }, [mode, connected]);
+    void loadLive(walletAddress);
+  }, [mode, connected, walletAddress, depth, loadDemo, loadLive]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const known = useMemo(() => snapshot?.counterparties ?? [], [snapshot]);
-  const ownWallet = mode === "live" ? (publicKey?.toBase58() ?? null) : (snapshot?.wallet ?? null);
+  const ownWallet = mode === "live" ? walletAddress : (snapshot?.wallet ?? null);
 
   const report = useMemo(
     () => (candidate.trim() ? evaluateAddress(candidate, known, ownWallet) : null),
@@ -166,255 +194,295 @@ export default function ShieldApp() {
   const historyLookalikes = useMemo(() => findHistoryLookalikes(known), [known]);
 
   const switchMode = useCallback((next: DataMode) => {
+    if (next === mode) return;
+    abortRef.current?.abort();
     setMode(next);
     setCandidate("");
     setError(null);
     setProgress(null);
     setSnapshot(null);
     setStatus("idle");
-  }, []);
+  }, [mode]);
 
-  const refresh = useCallback(() => {
+  const rescan = useCallback(() => {
     if (mode === "demo") {
       loadDemo();
       return;
     }
-    if (publicKey) void loadLive(publicKey.toBase58());
-  }, [mode, publicKey, loadDemo, loadLive]);
+    if (walletAddress) void loadLive(walletAddress, { force: true });
+  }, [mode, walletAddress, loadDemo, loadLive]);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    setProgress(null);
+    setStatus(snapshot ? "ready" : "idle");
+  }, [snapshot]);
 
   const handlePaste = useCallback(async () => {
     try {
       const text = await navigator.clipboard.readText();
       if (text) setCandidate(normalizeAddress(text));
     } catch {
-      return;
+      // Clipboard permission denied: the input is still editable by hand.
     }
   }, []);
 
   const focusResult = useCallback(() => {
-    document.getElementById("verdict")?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
+    if (window.innerWidth >= 1024) return;
+    document.getElementById("verdict")?.scrollIntoView({ block: "nearest" });
   }, []);
 
-  return (
-    <div className="mx-auto w-full max-w-6xl px-4 pb-16 pt-6 sm:px-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Logo />
-          <div>
-            <p className="text-base font-bold leading-tight text-white">Solana Shield</p>
-            <p className="text-[11px] text-mute">Address-poisoning firewall</p>
-          </div>
-        </div>
+  const statusText =
+    mode === "demo"
+      ? "sample wallet"
+      : connected
+        ? rpcHost
+        : "wallet not connected";
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="hidden items-center gap-1.5 rounded-full border border-line px-3 py-1 text-[11px] text-mute sm:inline-flex">
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                mode === "demo"
-                  ? "bg-sol"
-                  : connected
-                    ? "bg-safe"
-                    : "bg-mute"
-              }`}
-            />
-            {mode === "demo" ? "Demo data" : connected ? rpcHost : "Not connected"}
-          </span>
-          <ModeSwitch mode={mode} onChange={switchMode} />
-          <WalletMultiButton />
+  return (
+    <div className="min-h-screen">
+      <header className="border-b border-line">
+        <div className="mx-auto flex h-14 w-full max-w-[1160px] items-center justify-between gap-4 px-4 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <span className="text-[#e7e9ec]">
+              <Mark />
+            </span>
+            <span className="text-[14px] font-semibold tracking-tight text-[#f1f2f4]">
+              Solana Shield
+            </span>
+            <span className="mono hidden text-[10.5px] text-dim sm:inline">
+              {statusText}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div
+              className="flex h-8 items-center rounded-md border border-line"
+              role="group"
+              aria-label="Data source"
+            >
+              {(["live", "demo"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => switchMode(option)}
+                  aria-pressed={mode === option}
+                  className={`h-full px-2.5 text-[11.5px] font-medium transition-colors ${
+                    mode === option
+                      ? "bg-[#1a1f25] text-[#f1f2f4]"
+                      : "text-dim hover:text-[#d8dbe0]"
+                  }`}
+                >
+                  {option === "live" ? "Live" : "Sample"}
+                </button>
+              ))}
+            </div>
+            <WalletMultiButton />
+          </div>
         </div>
       </header>
 
-      <section className="mt-10">
-        <span className="chip border-sol/30 text-sol">Solana × MLH Hackathon · 2026</span>
-        <h1 className="mt-4 max-w-3xl text-4xl font-black leading-[1.05] tracking-tight text-white sm:text-5xl">
-          Stop address poisoning
-          <span className="block bg-gradient-to-r from-sol to-safe bg-clip-text text-transparent">
-            before you send.
-          </span>
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-mute sm:text-base">
-          Paste the destination address. Solana Shield diffs it against every
-          counterparty in your recent history and catches the lookalikes that
-          copy the first and last characters of an address you already trust.
-        </p>
-      </section>
+      <main className="mx-auto w-full max-w-[1160px] px-4 pb-10 sm:px-6">
+        <section className="py-7 sm:py-9">
+          <p className="mono text-[10.5px] uppercase tracking-[0.18em] text-dim">
+            Solana mainnet · client-side
+          </p>
+          <h1 className="mt-2.5 max-w-3xl text-[26px] font-semibold leading-[1.15] tracking-tight text-[#f4f5f7] sm:text-[32px]">
+            Check an address against your own history.
+          </h1>
+          <p className="mt-2.5 max-w-2xl text-[13px] leading-6 text-mute">
+            Address poisoning hides a fake wallet behind the same first and last
+            characters as one you already pay. Paste a destination and Shield diffs
+            it against the counterparties in your recent transactions — on this
+            device, with no keys and no server.
+          </p>
+        </section>
 
-      <HistoryAlert pairs={historyLookalikes} />
+        <HistoryAlert pairs={historyLookalikes} />
 
-      <div className="mt-8 grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-        <section className="card p-5 shadow-glow">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="label">Destination address</p>
-            {snapshot ? (
-              <span className="chip">
-                diffed against {known.length} address{known.length === 1 ? "" : "es"}
-              </span>
-            ) : (
-              <span className="chip">
-                {mode === "demo" ? "simulated history" : "waiting for history"}
-              </span>
-            )}
-          </div>
+        <section className="panel mt-5 overflow-hidden">
+          <div className="grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+            <div className="min-w-0 lg:border-r lg:border-line">
+              <div className="p-4 sm:p-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <label htmlFor="candidate" className="label">
+                    Destination address
+                  </label>
+                  <span className="mono text-[10.5px] text-dim">
+                    {snapshot
+                      ? `${known.length} addresses in context`
+                      : mode === "live" && !connected
+                        ? "wallet not connected"
+                        : "waiting for history"}
+                  </span>
+                </div>
 
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <div className="relative flex-1">
-              <input
-                value={candidate}
-                onChange={(event) => setCandidate(event.target.value)}
-                spellCheck={false}
-                autoComplete="off"
-                autoCapitalize="off"
-                aria-label="Solana address to check"
-                placeholder="Paste a Solana address (base58)"
-                className="mono w-full rounded-xl border border-line bg-black/40 px-4 py-3.5 pr-24 text-sm text-slate-100 outline-none transition placeholder:text-mute/60 focus:border-sol/60"
-              />
-              <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => void handlePaste()}
-                  className="rounded-lg px-2 py-1 text-[11px] font-semibold text-mute transition hover:bg-white/5 hover:text-slate-200"
-                >
-                  Paste
-                </button>
-                {candidate ? (
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                  <div className="relative min-w-0 flex-1">
+                    <input
+                      id="candidate"
+                      value={candidate}
+                      onChange={(event) => setCandidate(event.target.value)}
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      aria-label="Solana address to check"
+                      placeholder="Base58 address or solana: link"
+                      className="field mono pr-14"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handlePaste()}
+                      className="absolute right-1 top-1 h-9 px-2 text-[11px] font-medium text-dim transition-colors hover:text-[#e7e9ec]"
+                    >
+                      Paste
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setCandidate("")}
-                    className="rounded-lg px-2 py-1 text-[11px] font-semibold text-mute transition hover:bg-white/5 hover:text-slate-200"
+                    onClick={focusResult}
+                    disabled={!candidate.trim()}
+                    className="btn-primary h-11 sm:w-28"
                   >
-                    Clear
+                    Check
                   </button>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <p className="text-[11px] text-dim">
+                    Analysis is local and instant. Your address is never transmitted.
+                  </p>
+                  {candidate ? (
+                    <button
+                      type="button"
+                      onClick={() => setCandidate("")}
+                      className="text-[11px] text-dim hover:text-[#e7e9ec]"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+
+                {mode === "demo" ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="text-[10.5px] text-dim">Try:</span>
+                    <button
+                      type="button"
+                      onClick={() => setCandidate(demo.lookalike)}
+                      className="text-[11px] text-danger hover:underline hover:underline-offset-4"
+                    >
+                      Poisoned lookalike
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCandidate(demo.real)}
+                      className="text-[11px] text-safe hover:underline hover:underline-offset-4"
+                    >
+                      Real address
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCandidate(demo.suspicious)}
+                      className="text-[11px] text-warn hover:underline hover:underline-offset-4"
+                    >
+                      Weak lookalike
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCandidate(demo.unrelated)}
+                      className="text-[11px] text-mute hover:text-[#e7e9ec] hover:underline hover:underline-offset-4"
+                    >
+                      Unknown address
+                    </button>
+                  </div>
+                ) : null}
+
+                {mode === "live" && !connected ? (
+                  <p className="mt-3 text-[11.5px] leading-5 text-dim">
+                    Connect a wallet to read your own history, or open the{" "}
+                    <button
+                      type="button"
+                      onClick={() => switchMode("demo")}
+                      className="text-[#d8dbe0] underline underline-offset-4 hover:text-white"
+                    >
+                      sample wallet
+                    </button>{" "}
+                    to see the checks.
+                  </p>
                 ) : null}
               </div>
-            </div>
-            <button
-              type="button"
-              onClick={focusResult}
-              disabled={!candidate.trim() || status === "loading"}
-              className="btn-primary sm:w-auto"
-            >
-              Check address
-            </button>
-          </div>
 
-          <p className="mt-2 text-[11px] text-mute">
-            Analysis is instant and local. Your address never leaves this browser.
-          </p>
-
-          {mode === "demo" ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-mute">Demo targets:</span>
-              <button
-                type="button"
-                onClick={() => setCandidate(demo.lookalike)}
-                className="chip border-danger/40 text-danger transition hover:bg-danger/10"
-              >
-                Poisoned lookalike
-              </button>
-              <button
-                type="button"
-                onClick={() => setCandidate(demo.real)}
-                className="chip border-safe/35 text-safe transition hover:bg-safe/10"
-              >
-                Real address
-              </button>
-              <button
-                type="button"
-                onClick={() => setCandidate(demo.suspicious)}
-                className="chip border-warn/35 text-warn transition hover:bg-warn/10"
-              >
-                Weak lookalike
-              </button>
-              <button
-                type="button"
-                onClick={() => setCandidate(demo.unrelated)}
-                className="chip transition hover:text-slate-200"
-              >
-                Unknown address
-              </button>
-            </div>
-          ) : null}
-
-          {mode === "live" && !connected ? (
-            <div className="mt-4 rounded-xl border border-warn/25 bg-warn/5 p-3 text-[12px] leading-5 text-warn">
-              Connect Phantom or Solflare with the button above to scan your own
-              history. Prefer not to? Switch to{" "}
-              <span className="font-semibold">Demo</span> — it needs no wallet.
-            </div>
-          ) : null}
-
-          <div id="verdict" className="mt-5 scroll-mt-6">
-            {report ? (
-              <VerdictCard report={report} />
-            ) : (
-              <div className="rounded-2xl border border-dashed border-line bg-white/[0.015] p-5">
-                <div className="grid gap-4 sm:grid-cols-3">
-                  {STEPS.map((step, index) => (
-                    <div key={step.title} className="flex gap-3">
-                      <span className="mono mt-0.5 text-[11px] font-bold text-sol">
-                        0{index + 1}
-                      </span>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-200">
-                          {step.title}
-                        </p>
-                        <p className="mt-1 text-[12px] leading-5 text-mute">
-                          {step.body}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-4 border-t border-line pt-3 text-[11px] text-mute">
-                  {snapshot
-                    ? `Ready — ${known.length} counterparties in context. Paste an address to see the verdict.`
-                    : mode === "live" && !connected
-                      ? "Connect a wallet to scan real history, or switch to Demo."
-                      : "Waiting for history…"}
-                </p>
+              <div id="verdict" className="border-t border-line">
+                {report ? (
+                  <VerdictCard report={report} />
+                ) : (
+                  <div className="px-4 py-5 sm:px-5">
+                    <ol className="space-y-2">
+                      {EMPTY_STEPS.map((step, index) => (
+                        <li
+                          key={step.title}
+                          className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 text-[12px] leading-5"
+                        >
+                          <span className="mono text-[10.5px] text-dim">
+                            0{index + 1}
+                          </span>
+                          <span>
+                            <span className="font-medium text-[#d8dbe0]">
+                              {step.title}.
+                            </span>{" "}
+                            <span className="text-mute">{step.body}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                    <p className="mt-4 border-t border-line pt-3 text-[11px] text-dim">
+                      {snapshot
+                        ? `Ready — ${known.length} counterpart${known.length === 1 ? "y" : "ies"} loaded. Paste an address to see the verdict.`
+                        : mode === "live" && !connected
+                          ? "Connect a wallet to scan, or open the sample wallet."
+                          : "Reading history…"}
+                    </p>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+
+            <HistoryPanel
+              snapshot={snapshot}
+              mode={mode}
+              status={status}
+              progress={progress}
+              error={error}
+              highlight={report?.best?.address ?? null}
+              connected={connected}
+              depth={depth}
+              onDepthChange={changeDepth}
+              onRefresh={rescan}
+              onStop={stop}
+            />
           </div>
         </section>
 
-        <HistoryPanel
-          snapshot={snapshot}
-          mode={mode}
-          status={status}
-          progress={progress}
-          error={error}
-          highlight={report?.best?.address ?? null}
-          connected={connected}
-          onRefresh={refresh}
-        />
-      </div>
+        <Education />
 
-      <Education />
-
-      <footer className="mt-14 border-t border-line pt-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-xl text-[11px] leading-5 text-mute">
-            Solana Shield is a hackathon MVP. It compares an address against your
-            own recent counterparties only — it is a strong warning system, not a
-            guarantee. Always confirm the full address out-of-band before sending
-            funds.
+        <footer className="mt-9 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 text-[11px] text-dim">
+          <p className="max-w-xl leading-5">
+            Hackathon build. It compares only the scanned window and is a warning,
+            not a guarantee. Confirm the full address out-of-band before sending.
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            <span className="chip">Next.js 14</span>
-            <span className="chip">@solana/web3.js</span>
-            <span className="chip">Client-side only</span>
-            <span className="chip">No keys, ever</span>
+          <div className="flex items-center gap-4">
+            <a
+              href="https://github.com/AdewuyiDaniels/solana-shield"
+              target="_blank"
+              rel="noreferrer"
+              className="transition-colors hover:text-[#e7e9ec]"
+            >
+              Source
+            </a>
+            <span className="mono">Solana × MLH 2026</span>
           </div>
-        </div>
-        <p className="mt-4 text-[11px] text-mute/70">
-          Built for the Solana × MLH Hackathon, November 2026. Current context:{" "}
-          {shortAddress(snapshot?.wallet ?? "no wallet", 6)} ·{" "}
-          {mode === "demo" ? "simulated data" : rpcHost}.
-        </p>
-      </footer>
+        </footer>
+      </main>
     </div>
   );
 }

@@ -40,3 +40,12 @@ next-env.d.ts
 # local scratch
 *.log
 rpcprobe*.mjs
+
+# local agent skills
+.agents/
+.taste-skill/
+
+# agent scratch
+.claude/
+skills-lock.json
+dump-live.html

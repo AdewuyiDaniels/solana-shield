@@ -7,87 +7,135 @@
 }
 
 html {
-  scroll-behavior: smooth;
+  background: #0a0b0d;
 }
 
 body {
-  background:
-    radial-gradient(1100px 560px at 12% -8%, rgba(153, 69, 255, 0.16), transparent 62%),
-    radial-gradient(900px 480px at 92% 2%, rgba(20, 241, 149, 0.09), transparent 58%),
-    #05070c;
-  color: #e8edf6;
+  background: #0a0b0d;
+  color: #e7e9ec;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "tnum" 1;
 }
 
 ::selection {
-  background: rgba(153, 69, 255, 0.45);
+  background: #3a424d;
+  color: #ffffff;
 }
 
+:focus-visible {
+  outline: 2px solid #e7e9ec;
+  outline-offset: 2px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2b3138 #0a0b0d;
+}
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #05070c;
+  background: #0a0b0d;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1b2333;
-  border-radius: 999px;
+  background: #2b3138;
+  border-radius: 8px;
+  border: 2px solid #0a0b0d;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3548;
+  background: #3a424d;
 }
 
 @layer components {
-  .card {
-    @apply rounded-2xl border border-line bg-panel/80 backdrop-blur;
+  .panel {
+    @apply rounded-lg border border-line bg-panel;
   }
-  .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-white/[0.02] px-3 py-1 text-xs text-mute;
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+      monospace;
+    font-variant-numeric: tabular-nums;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[12.5px] font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sol to-safe px-4 py-2.5 text-sm font-semibold text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply btn border border-white bg-white text-ink hover:bg-[#d9dce1] active:translate-y-px;
   }
-  .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50;
+  .btn-secondary {
+    @apply btn border border-line2 bg-transparent text-[#d8dbe0] hover:border-[#4a5260] hover:bg-[#171b20] active:translate-y-px;
+  }
+  .btn-quiet {
+    @apply btn border border-transparent text-mute hover:bg-[#171b20] hover:text-[#e7e9ec];
+  }
+  .field {
+    @apply h-11 w-full rounded-md border border-line2 bg-[#0c0e11] px-3 text-[13px] text-[#e7e9ec] placeholder:text-dim focus:border-[#5b6472] focus:outline-none;
   }
   .label {
-    @apply text-[11px] font-semibold uppercase tracking-[0.16em] text-mute;
+    @apply text-[10.5px] font-medium uppercase tracking-[0.16em] text-dim;
+  }
+  .rule {
+    @apply border-t border-line;
   }
 }
 
 .wallet-adapter-button {
-  background-image: linear-gradient(90deg, #9945ff, #14f195) !important;
-  color: #05070c !important;
+  background-image: none !important;
+  background-color: #e7e9ec !important;
+  color: #0a0b0d !important;
   font-family: inherit !important;
-  font-weight: 700 !important;
-  font-size: 13px !important;
-  height: 40px !important;
-  padding: 0 16px !important;
-  border-radius: 12px !important;
+  font-weight: 600 !important;
+  font-size: 12.5px !important;
+  height: 36px !important;
+  padding: 0 14px !important;
+  border-radius: 6px !important;
   line-height: 1 !important;
 }
 .wallet-adapter-button:not([disabled]):hover {
-  filter: brightness(1.08);
+  background-color: #ffffff !important;
 }
 .wallet-adapter-button-trigger {
-  background-image: linear-gradient(90deg, #9945ff, #14f195) !important;
+  background-image: none !important;
+  background-color: #e7e9ec !important;
+}
+.wallet-adapter-button .wallet-adapter-button-start-icon {
+  width: 16px !important;
+  height: 16px !important;
 }
 .wallet-adapter-modal-wrapper {
-  background: #0a0e17 !important;
-  border: 1px solid #1b2333 !important;
+  background: #0f1114 !important;
+  border: 1px solid #23272e !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
 }
 .wallet-adapter-modal-title {
-  color: #e8edf6 !important;
+  color: #e7e9ec !important;
+  font-family: inherit !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
 }
 .wallet-adapter-modal-button-close {
-  background: #141b29 !important;
+  background: #1b2026 !important;
 }
 .wallet-adapter-modal-list .wallet-adapter-button {
   background-image: none !important;
-  background-color: #101724 !important;
-  color: #e8edf6 !important;
+  background-color: #14181d !important;
+  border: 1px solid #23272e !important;
+  color: #e7e9ec !important;
+  border-radius: 6px !important;
+}
+.wallet-adapter-modal-list .wallet-adapter-button:hover {
+  background-color: #1a1f25 !important;
+}
+.wallet-adapter-dropdown-list {
+  background: #14181d !important;
+  border: 1px solid #23272e !important;
+  border-radius: 8px !important;
+}
+.wallet-adapter-dropdown-list-item {
+  color: #d8dbe0 !important;
+}
+.wallet-adapter-dropdown-list-item:hover {
+  background: #1f252c !important;
 }

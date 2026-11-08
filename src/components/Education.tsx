@@ -1,71 +1,76 @@
 const STEPS = [
   {
     number: "01",
-    title: "Attackers watch the chain",
-    body: "They see an address you have paid before and generate a brand-new keypair whose address starts and ends with the same characters.",
+    title: "Attacker reads the chain",
+    body: "It sees an address you already pay and grinds a new keypair whose address starts and ends the same way.",
   },
   {
     number: "02",
-    title: "They send you dust",
-    body: "A tiny transfer from the fake address lands in your history, so it now appears next to the real one in your wallet.",
+    title: "Dust enters your history",
+    body: "A tiny transfer from the fake address lands beside the real one, so both rows look identical when shortened.",
   },
   {
     number: "03",
     title: "You copy the wrong row",
-    body: "Later you copy from history, paste it, and only glance at the first four and last four characters. The money is gone.",
+    body: "You paste from history and glance at the first and last characters. The full address is different. The funds are gone.",
   },
 ];
 
 export function Education() {
   return (
-    <section id="how-it-works" className="mt-14">
-      <div className="mb-6">
-        <p className="label mb-2">How the attack works</p>
-        <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-          Address poisoning, in three steps
+    <section className="mt-8 border-t border-line pt-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-[13px] font-semibold text-[#d8dbe0]">
+          How address poisoning works
         </h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-mute">
-          A Solana address is a 32-byte public key shown as 43–44 base58
-          characters. Wallets shorten it to <code className="mono text-slate-300">7xKX…9AsU</code>, and that
-          shortening is exactly what the attacker exploits.
-        </p>
+        <span className="mono text-[10.5px] text-dim">
+          32 bytes rendered as 43–44 base58 characters
+        </span>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="mt-4 grid gap-5 sm:grid-cols-3">
         {STEPS.map((step) => (
-          <div key={step.number} className="card p-5">
-            <span className="mono text-xs font-bold text-sol">{step.number}</span>
-            <h3 className="mt-3 text-base font-semibold text-white">{step.title}</h3>
-            <p className="mt-2 text-sm leading-6 text-mute">{step.body}</p>
+          <div key={step.number}>
+            <span className="mono text-[10.5px] text-dim">{step.number}</span>
+            <h3 className="mt-1.5 text-[12.5px] font-semibold text-[#d8dbe0]">
+              {step.title}
+            </h3>
+            <p className="mt-1 text-[11.5px] leading-5 text-mute">{step.body}</p>
           </div>
         ))}
       </div>
 
-      <div className="card mt-4 overflow-hidden">
-        <div className="grid gap-0 md:grid-cols-2">
-          <div className="border-b border-line p-5 md:border-b-0 md:border-r">
-            <p className="label mb-2 text-safe">The address you meant to pay</p>
-            <code className="mono break-all text-sm leading-6 text-slate-200">
-              7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosg<span className="rounded bg-safe/15 font-bold text-safe">9AsU</span>
+      <div className="mt-5 overflow-hidden rounded-md border border-line">
+        <div className="grid md:grid-cols-2">
+          <div className="border-b border-line p-3 md:border-b-0 md:border-r">
+            <p className="label mb-1.5 text-safe">The address you meant to pay</p>
+            <code className="mono block break-all text-[12px] leading-[1.75] text-[#c6ccd4]">
+              7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosg
+              <span className="bg-safe/20 font-semibold text-safe">9AsU</span>
             </code>
-            <p className="mt-3 text-xs text-mute">
-              14 successful interactions · first seen 3 months ago
+            <p className="mono mt-2 text-[10.5px] text-dim">
+              14 interactions · first seen 3 months ago
             </p>
           </div>
-          <div className="p-5">
-            <p className="label mb-2 text-danger">The poisoned lookalike</p>
-            <code className="mono break-all text-sm leading-6 text-slate-200">
-              7xKX<span className="rounded bg-danger/20 px-0.5 font-bold text-danger">mQ4vR8pL2wZcN6yB</span>hTqA83TZRuJosg<span className="rounded bg-safe/15 font-bold text-safe">9AsU</span>
+          <div className="p-3">
+            <p className="label mb-1.5 text-danger">The poisoned twin</p>
+            <code className="mono block break-all text-[12px] leading-[1.75] text-[#c6ccd4]">
+              7xKX
+              <span className="bg-danger/20 font-semibold text-danger">
+                mQ4vR8pL2wZcN6yB
+              </span>
+              hTqA83TZRuJosg
+              <span className="bg-safe/20 font-semibold text-safe">9AsU</span>
             </code>
-            <p className="mt-3 text-xs text-mute">
-              0 interactions · arrived as a 0.000001 SOL dust transfer
+            <p className="mono mt-2 text-[10.5px] text-dim">
+              0 sent · 0.000001 SOL received · dust only
             </p>
           </div>
         </div>
-        <div className="border-t border-line bg-white/[0.02] px-5 py-3 text-xs text-mute">
-          Identical first four and last four characters. Completely different
-          wallet. This is why “I checked the start and end” is not enough.
-        </div>
+        <p className="border-t border-line px-3 py-2 text-[11px] text-dim">
+          The visible ends match. The wallet does not. Checking four characters is not
+          a check.
+        </p>
       </div>
     </section>
   );

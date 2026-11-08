@@ -5,17 +5,28 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#05070c",
-        panel: "#0a0e17",
-        raised: "#0e1420",
-        line: "#1b2333",
-        mute: "#8b97ab",
-        safe: "#14f195",
-        warn: "#ffb020",
-        danger: "#ff3b5c",
-        sol: "#9945ff",
+        ink: "#0a0b0d",
+        panel: "#0f1114",
+        raised: "#15181c",
+        line: "#23272e",
+        line2: "#343a43",
+        mute: "#99a1ab",
+        dim: "#6a7079",
+        safe: "#45d19a",
+        warn: "#e6b04a",
+        danger: "#ef5f6b",
       },
       fontFamily: {
+        sans: [
+          "ui-sans-serif",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Inter",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
         mono: [
           "ui-monospace",
           "SFMono-Regular",
@@ -24,23 +35,6 @@ const config: Config = {
           "Liberation Mono",
           "monospace",
         ],
-      },
-      boxShadow: {
-        glow: "0 0 0 1px rgba(153,69,255,.18), 0 24px 70px -28px rgba(153,69,255,.45)",
-      },
-      keyframes: {
-        rise: {
-          "0%": { opacity: "0", transform: "translateY(8px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
-        },
-        sweep: {
-          "0%": { transform: "translateX(-100%)" },
-          "100%": { transform: "translateX(100%)" },
-        },
-      },
-      animation: {
-        rise: "rise .35s ease-out both",
-        sweep: "sweep 1.6s ease-in-out infinite",
       },
     },
   },
